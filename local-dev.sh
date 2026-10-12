@@ -53,6 +53,9 @@ ensure_env() {
   grep -q '^WEB_HOST=' .env || echo 'WEB_HOST=0.0.0.0' >> .env
   grep -q '^DEV_AUTH_ROLE=' .env || echo 'DEV_AUTH_ROLE=admin' >> .env
   grep -q '^DEV_AUTH_DISPLAY_NAME=' .env || echo 'DEV_AUTH_DISPLAY_NAME="Dev Admin"' >> .env
+  # 沙箱出口：平台封了框架依赖的 cloudflare DoH，IP 钉连不可用；关闭自带 dispatcher，
+  # 改用全局 EnvHttpProxyAgent（由 scripts/sandbox-global-proxy.cjs 注入）走平台代理。
+  grep -q '^ALLOW_PRIVATE_NETWORK_FETCH=' .env || echo 'ALLOW_PRIVATE_NETWORK_FETCH=true' >> .env
   # 安全阀：没有真实 LLM Key 前保持关闭；提供了 LLM_API_KEY 则打开
   if [ -n "${LLM_API_KEY:-}" ]; then
     sed -i 's/^COLLECT_ENABLED=.*/COLLECT_ENABLED=true/; s/^MODEL_CALLS_ENABLED=.*/MODEL_CALLS_ENABLED=true/' .env
@@ -141,6 +144,16 @@ setup() {
 
 case "${1:-up}" in
   setup) setup ;;
+  run)
+    # 前台运行单个服务（沙箱里后台进程会被回收，用长驻命令方式启动）：bash local-dev.sh run api|worker|web
+    set -a; source /workspace/.env; set +a
+    export NODE_OPTIONS="${NODE_OPTIONS:-} --require /workspace/scripts/sandbox-global-proxy.cjs"
+    case "$2" in
+      api) exec node apps/api/src/main.ts ;;
+      worker) exec node apps/worker/src/main.ts ;;
+      web) cd apps/web && exec node server.ts ;;
+      *) echo "usage: bash local-dev.sh run api|worker|web" ;;
+    esac ;;
   up) up ;;
   down) down ;;
   status) status ;;
